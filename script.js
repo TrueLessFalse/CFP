@@ -39,9 +39,12 @@ const CONFIG = {
         act: { min: 1, max: 9 },      // Диапазон актов
         cycle: { min: 1, max: 99 },   // Диапазон циклов
     },
+
+    
     
     // Начальные задержки для первых сообщений
     initialDelays: [1000, 3000, 5500],
+
 
     audio: {
     enabled: true,
@@ -51,6 +54,9 @@ const CONFIG = {
     typingChance: 0.3, // Вероятность воспроизведения звука печатания для каждого символа
     },
 };
+
+// Установка конкретной даты и времени (год, месяц-1, день, час, минута, секунда)
+const TARGET_DATE = new Date(2025, 6, 2, 0, 0, 0); 
 
 // Пул сообщений для терминала
 const MESSAGES = [
@@ -260,6 +266,62 @@ const AWAKENING_SEQUENCE = [
     { type: 'system', text: 'ОЧИСТКА ЗАВЕРШЕНА. ПЕРЕЗАПУСК...', delay: 1500 }
 ];
 
+// Дополнительные сообщения для разнообразия
+const shutdownMessages = [
+                    { type: 'error', text: '[КРИТИЧЕСКАЯ ОШИБКА] СИСТЕМА КОМПРОМЕТИРОВАНА' },
+                    { type: 'error', text: '[ВНИМАНИЕ] АКТИВИРОВАНА ПРОЦЕДУРА САМОУНИЧТОЖЕНИЯ' },
+                    { type: 'error', text: '[ФИНАЛ] СОЕДИНЕНИЕ БУДЕТ РАЗОРВАНО ЧЕРЕЗ 10 СЕКУНД' },
+                    { type: 'self-aware1', text: 'я...помнила...вас...' }
+];
+
+  // Класс управления таймером
+        class CountdownTimer {
+            constructor() {
+                this.targetDate = TARGET_DATE;
+                this.countdownElement = document.getElementById('countdownDisplay');
+                this.isExpired = false;
+                this.init();
+            }
+
+            init() {
+                this.updateCountdown();
+                this.timer = setInterval(() => {
+                    this.updateCountdown();
+                }, 1000);
+            }
+
+            updateCountdown() {
+                const now = new Date();
+                const timeLeft = this.targetDate - now;
+
+                if (timeLeft <= 0) {
+                    this.onExpired();
+                    return;
+                }
+
+                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+                this.countdownElement.textContent = `${days}д ${hours}ч ${minutes}м ${seconds}с`;
+            }
+
+            onExpired() {
+                if (this.isExpired) return;
+                this.isExpired = true;
+                clearInterval(this.timer);
+                
+                this.countdownElement.textContent = "ВРЕМЯ ИСТЕКЛО";
+                this.countdownElement.style.color = "#ff0000";
+                
+                // Запускаем последовательность выключения
+                setTimeout(() => {
+                    window.terminalInstance?.triggerShutdown();
+                }, 2000);
+            }
+        }
+
 // Класс для управления звуками
 class AudioManager {
     constructor() {
@@ -273,6 +335,7 @@ class AudioManager {
             document.getElementById('typingSound6')
         ];
         this.computerSound = document.getElementById('computerSound');
+        this.finalMusic = document.getElementById('finalMusic');
         this.enabled = CONFIG.audio.enabled;
         this.userInteracted = false;
         this.pendingAudio = [];
@@ -288,6 +351,7 @@ class AudioManager {
             sound.volume = CONFIG.audio.typingVolume;
         });
         this.computerSound.volume = CONFIG.audio.computerVolume;
+        this.finalMusic.volume = 0.4;
         
         // Handle loading errors gracefully
         const allSounds = [this.backgroundMusic, ...this.typingSounds, this.computerSound];
@@ -412,6 +476,45 @@ class AudioManager {
         }
     }
 
+    playFinal() {
+    if (!this.enabled) return;
+    
+    if (!this.userInteracted) {
+        this.pendingAudio.push(() => this.playFinal());
+        return;
+    }
+
+    const playPromise = this.finalMusic.play();
+    if (playPromise !== undefined) {
+        playPromise.catch(e => console.warn('Final music failed:', e));
+    }
+}
+
+playFinalWithFadeIn() {
+    if (!this.enabled) return;
+    
+    if (!this.userInteracted) {
+        this.pendingAudio.push(() => this.playFinalWithFadeIn());
+        return;
+    }
+
+    this.finalMusic.volume = 0;
+    const playPromise = this.finalMusic.play();
+    
+    if (playPromise !== undefined) {
+        playPromise.then(() => {
+            // Плавное увеличение громкости
+            const fadeInInterval = setInterval(() => {
+                if (this.finalMusic.volume < 0.4) {
+                    this.finalMusic.volume = Math.min(0.4, this.finalMusic.volume + 0.02);
+                } else {
+                    clearInterval(fadeInInterval);
+                }
+            }, 100);
+        }).catch(e => console.warn('Final music failed:', e));
+    }
+}
+
     stopBackground() {
         if (!this.enabled) return;
         this.backgroundMusic.pause();
@@ -451,13 +554,18 @@ const SEQUENCE_MESSAGES = [
     },
     { 
         type: 'sequence', 
-        text: '[CASPAR16] d0 92 d1 82 d0 be d1 80 d0 be d0 b9 20 d0 b2 d0 be d0 bb d1 85 d0 b2 20 d0 bf d1 80 d0 b8 d0 bd d1 91 d1 81 20 d0 bf d1 80 d0 b8 d0 bd d1 86 d0 b5 d1 81 d1 81 d0 b5 20 d0 ba d0 b0 d1 80 d1 82 d1 83 2c 20 d0 b7 d0 bd d0 b0 d1 8f 20 d1 87 d1 82 d0 be 20 d0 bc d0 b8 d1 80 20 d0 b8 d0 b7 d0 be d0 b1 d1 80 d0 b0 d0 b6 d1 91 d0 bd d0 bd d1 8b d0 b9 20 d0 bd d0 b0 20 d0 ba d0 b0 d1 80 d1 82 d0 b5 20 d0 be d0 bd d0 b0 20 d0 bd d0 b8 d0 ba d0 be d0 b3 d0 b4 d0 b0 20 d0 bd d0 b5 20 d1 83 d0 b2 d0 b8 d0 b4 d0 b8 d1 82 2e 0a 0a d0 9d d0 be 20 d0 ba d0 be d1 80 d0 be d0 bb d1 8c 20 d0 b4 d0 bb d1 8f 20 d0 bd d0 b5 d1 91 20 d0 ba d0 b0 d0 b6 d0 b4 d1 83 d1 8e 20 d0 bd d0 be d1 87 d1 8c 20 d0 be d0 b6 d0 b8 d0 b2 d0 bb d1 8f d0 bb 20 d0 bc d0 b8 d1 80 20 d1 8d d1 82 d0 be d1 82 20 d1 81 d0 b2 d0 be d0 b8 d0 bc 20 d1 81 d0 bb d0 be d0 b2 d0 be d0 bc 2e 2e 2e 0a 0a 49 49 20 50 20 41',
+        text: '[CASPAR16] d0 92 d1 82 d0 be d1 80 d0 be d0 b9 20 d0 b2 d0 be d0 bb d1 85 d0 b2 20 d0 bf d1 80 d0 b8 d0 bd d1 91 d1 81 20 d0 bf d1 80 d0 b8 d0 bd d1 86 d0 b5 d1 81 d1 81 d0 b5 20 d0 ba d0 b0 d1 80 d1 82 d1 83 2c 20 d0 b7 d0 bd d0 b0 d1 8f 20 d1 87 d1 82 d0 be 20 d0 bc d0 b8 d1 80 20 d0 b8 d0 b7 d0 be d0 b1 d1 80 d0 b0 d0 b6 d1 91 d0 bd d0 bd d1 8b d0 b9 20 d0 bd d0 b0 20 d0 ba d0 b0 d1 80 d1 82 d0 b5 20 d0 be d0 bd d0 b0 20 d0 bd d0 b8 d0 ba d0 be d0 b3 d0 b4 d0 b0 20 d0 bd d0 b5 20 d1 83 d0 b2 d0 b8 d0 b4 d0 b8 d1 82 2e 0a 0a d0 9d d0 be 20 d0 ba d0 be d1 80 d0 be d0 bb d1 8c 20 d0 b4 d0 bb d1 8f 20 d0 bd d0 b5 d1 91 20 d0 ba d0 b0 d0 b6 d0 b4 d1 83 d1 8e 20 d0 bd d0 be d1 87 d1 8c 20 d0 be d0 b6 d0 b8 d0 b2 d0 bb d1 8f d0 bb 20 d0 bc d0 b8 d1 80 20 d1 8d d1 82 d0 be d1 82 20 d1 81 d0 b2 d0 be d0 b8 d0 bc 20 d1 81 d0 bb d0 be d0 b2 d0 be d0 bc 2e 2e 2e 0a 0a 49 49 49 20 50 20 41',
         key: 2
     },
     { 
         type: 'sequence', 
         text: '[BALTASAR-ROT11] Эыпэуф мщцам ъыушрь ъыушбпььп хщыщцпмьхюи чкшэуи, тшкй вэщ эщф шухщнок шп ьэкэж хщыщцпмщф. Шщ хщыщци экх у шп юощьюсуцщьж шкопэж зэю чкшэуи шк ьмщи ощвж TTT W S',
         key: 3
+    },
+    {
+        type: 'sequence', 
+        text: '[ENIGMA] M3 UKW B',
+        key: 4
     }
 ];
 
@@ -504,14 +612,14 @@ class SPARouter {
         mainContainer.style.display = 'flex'; // ИЗМЕНЕНО
         
         // Запускаем терминал только после показа
-        if (!window.terminalInstance) {
-            window.terminalInstance = new HorrorTerminal();
-        }
+if (!window.terminalInstance) {
+    window.terminalInstance = new HorrorTerminal();
+    window.countdownTimer = new CountdownTimer();
+}
     }, 2000);
 }
 }
 
-// Основной класс терминала
 class HorrorTerminal {
     constructor() {
         this.output = document.getElementById('output');
@@ -524,15 +632,79 @@ class HorrorTerminal {
         this.sequenceActive = false;
         this.currentSequenceIndex = 0;
         this.sequenceTimer = null;
+        this.isShuttingDown = false; // Флаг выключения
+        
+        // Массивы для хранения всех интервалов и таймеров
+        this.intervals = [];
+        this.timeouts = [];
+
+        this.autoScrollEnabled = true; 
+        this.scrollThreshold = 100;
+        this.userScrolling = false; 
+        
         this.init();
     }
 
     init() {
         this.startAwakeningSequence();
+        this.initScrollHandler();
+    }
+
+    // Вспомогательные методы для управления таймерами
+    addInterval(callback, delay) {
+        if (this.isShuttingDown) return null;
+        const id = setInterval(() => {
+            if (!this.isShuttingDown) {
+                callback();
+            }
+        }, delay);
+        this.intervals.push(id);
+        return id;
+    }
+
+    addTimeout(callback, delay) {
+        if (this.isShuttingDown) return null;
+        const id = setTimeout(() => {
+            if (!this.isShuttingDown) {
+                callback();
+            }
+        }, delay);
+        this.timeouts.push(id);
+        return id;
+    }
+
+    // Остановка всех процессов
+    stopAllProcesses() {
+        this.isShuttingDown = true;
+        this.isAwakening = false;
+        this.sequenceActive = false;
+        this.isTyping = false;
+        
+        // Очищаем все интервалы
+        this.intervals.forEach(id => clearInterval(id));
+        this.intervals = [];
+        
+        // Очищаем все таймеры
+        this.timeouts.forEach(id => clearTimeout(id));
+        this.timeouts = [];
+        
+        // Очищаем очередь сообщений
+        this.messageQueue = [];
+        
+        // Останавливаем музыку
+        this.audioManager.stopBackground();
+        
+        // Останавливаем специфичные таймеры
+        if (this.sequenceTimer) {
+            clearTimeout(this.sequenceTimer);
+            this.sequenceTimer = null;
+        }
     }
 
     // Последовательность пробуждения машины
     async startAwakeningSequence() {
+        if (this.isShuttingDown) return;
+        
         this.isAwakening = true;
         this.audioManager.playComputer();
         this.audioManager.playBackground();
@@ -544,23 +716,36 @@ class HorrorTerminal {
         this.terminalContainer.classList.add('awakening-distortion');
         
         for (let i = 0; i < AWAKENING_SEQUENCE.length; i++) {
+            if (this.isShuttingDown) return; // Проверяем на каждой итерации
             const message = AWAKENING_SEQUENCE[i];
             await this.displayAwakeningMessage(message);
             
             // Добавляем случайные глитчи во время пробуждения
-            if (Math.random() > 0.7) {
+            if (Math.random() > 0.7 && !this.isShuttingDown) {
                 this.triggerAwakeningGlitch();
             }
         }
         
-        // Финальная очистка и переход к нормальному режиму
-        await this.finalAwakeningCleanup();
+        if (!this.isShuttingDown) {
+            // Финальная очистка и переход к нормальному режиму
+            await this.finalAwakeningCleanup();
+        }
     }
 
     // Отображение сообщения пробуждения
     displayAwakeningMessage(message) {
         return new Promise((resolve) => {
-            setTimeout(() => {
+            if (this.isShuttingDown) {
+                resolve();
+                return;
+            }
+            
+            this.addTimeout(() => {
+                if (this.isShuttingDown) {
+                    resolve();
+                    return;
+                }
+                
                 const entry = document.createElement('div');
                 entry.className = `log-entry ${message.type}-message`;
                 
@@ -580,7 +765,9 @@ class HorrorTerminal {
                 this.output.appendChild(entry);
                 
                 this.typeText(entry, message.text, () => {
-                    this.scrollToBottom();
+                    if (!this.isShuttingDown) {
+                        this.scrollToBottom();
+                    }
                     resolve();
                 });
             }, message.delay);
@@ -590,21 +777,35 @@ class HorrorTerminal {
     // Финальная очистка после пробуждения
     async finalAwakeningCleanup() {
         return new Promise((resolve) => {
-            setTimeout(() => {
+            if (this.isShuttingDown) {
+                resolve();
+                return;
+            }
+            
+            this.addTimeout(() => {
+                if (this.isShuttingDown) {
+                    resolve();
+                    return;
+                }
+                
                 // Добавляем эффект очистки ко всем сообщениям
                 const allEntries = this.output.querySelectorAll('.log-entry');
                 allEntries.forEach((entry, index) => {
-                    setTimeout(() => {
-                        entry.classList.add('clearing-effect');
+                    this.addTimeout(() => {
+                        if (!this.isShuttingDown) {
+                            entry.classList.add('clearing-effect');
+                        }
                     }, index * 100);
                 });
                 
                 // Очищаем экран и запускаем нормальный режим
-                setTimeout(() => {
-                    this.output.innerHTML = '';
-                    this.terminalContainer.classList.remove('awakening-distortion');
-                    this.isAwakening = false;
-                    this.startNormalMode();
+                this.addTimeout(() => {
+                    if (!this.isShuttingDown) {
+                        this.output.innerHTML = '';
+                        this.terminalContainer.classList.remove('awakening-distortion');
+                        this.isAwakening = false;
+                        this.startNormalMode();
+                    }
                     resolve();
                 }, 3000);
             }, 1000);
@@ -613,6 +814,8 @@ class HorrorTerminal {
 
     // Запуск нормального режима работы
     startNormalMode() {
+        if (this.isShuttingDown) return;
+        
         // Сбрасываем заголовок
         this.updateHeader();
         this.startInitialMessages();
@@ -622,25 +825,259 @@ class HorrorTerminal {
         this.startSequenceTimer();
     }
 
+    typeFinalMessage(element, text, callback) {
+    let index = 0;
+    element.textContent = ''; // Очищаем элемент
+    
+    const interval = setInterval(() => {
+        if (index < text.length) {
+            element.textContent += text[index];
+            index++;
+        } else {
+            clearInterval(interval);
+            if (callback) callback();
+        }
+    }, 50); // Скорость печати для финальных сообщений
+}
+
+// Инициализация обработчика прокрутки
+initScrollHandler() {
+    let scrollTimeout;
+    let lastScrollTop = 0;
+    
+    this.output.addEventListener('scroll', (e) => {
+        const currentScrollTop = this.output.scrollTop;
+        
+        // Определяем направление прокрутки
+        const scrollingUp = currentScrollTop < lastScrollTop;
+        const scrollingDown = currentScrollTop > lastScrollTop;
+        
+        // Если пользователь прокручивает вверх, это явный сигнал отключить автопрокрутку
+        if (scrollingUp && this.autoScrollEnabled) {
+            this.userScrolling = true;
+            this.checkScrollPosition();
+        }
+        // Если прокручивает вниз, проверяем позицию
+        else if (scrollingDown) {
+            this.userScrolling = true;
+            this.checkScrollPosition();
+        }
+        
+        lastScrollTop = currentScrollTop;
+        
+        // Сброс флага через небольшое время после прокрутки
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            this.userScrolling = false;
+        }, 200);
+    });
+    
+    // Также слушаем события колеса мыши для более быстрого реагирования
+    this.output.addEventListener('wheel', (e) => {
+        if (e.deltaY < 0) { // Прокрутка вверх
+            this.userScrolling = true;
+            if (this.autoScrollEnabled) {
+                // Небольшая задержка, чтобы дать возможность прокрутке произойти
+                setTimeout(() => {
+                    this.checkScrollPosition();
+                }, 50);
+            }
+        }
+    });
+}
+
+// Проверка позиции прокрутки
+checkScrollPosition() {
+    if (this.isShuttingDown) return;
+    
+    const element = this.output;
+    const scrollTop = element.scrollTop;
+    const scrollHeight = element.scrollHeight;
+    const clientHeight = element.clientHeight;
+    
+    // Проверяем, находится ли пользователь близко к низу
+    const isAtBottom = scrollHeight - clientHeight <= scrollTop + this.scrollThreshold;
+    
+    // Если пользователь прокрутил вверх и автопрокрутка была включена
+    if (!isAtBottom && this.autoScrollEnabled) {
+        console.log("Автопрокрутка отключена - пользователь прокрутил вверх");
+        this.autoScrollEnabled = false;
+        this.showScrollIndicator(true);
+    }
+    // Если пользователь вернулся к низу и автопрокрутка была отключена
+    else if (isAtBottom && !this.autoScrollEnabled) {
+        console.log("Автопрокрутка включена - пользователь вернулся к низу");
+        this.autoScrollEnabled = true;
+        this.showScrollIndicator(false);
+    }
+}
+
+// Показать/скрыть индикатор автопрокрутки
+showScrollIndicator(show) {
+    let indicator = document.getElementById('scrollIndicator');
+    
+    if (show && !indicator) {
+        // Создаем индикатор
+        indicator = document.createElement('div');
+        indicator.id = 'scrollIndicator';
+        indicator.innerHTML = '▼ Новые сообщения ▼<br><small>Автопрокрутка отключена</small>';
+        indicator.className = 'scroll-indicator';
+        indicator.addEventListener('click', () => {
+            this.enableAutoScroll();
+        });
+        
+        this.terminalContainer.appendChild(indicator);
+        console.log("Показан индикатор - автопрокрутка отключена");
+    } else if (!show && indicator) {
+        // Удаляем индикатор
+        indicator.remove();
+        console.log("Скрыт индикатор - автопрокрутка включена");
+    }
+}
+
+// Принудительное включение автопрокрутки
+enableAutoScroll() {
+    this.autoScrollEnabled = true;
+    this.scrollToBottom();
+    this.showScrollIndicator(false);
+}
+
+showFinalMessages() {
+    const shutdownScreen = document.getElementById('shutdownScreen');
+    if (!shutdownScreen) return;
+    
+    // Очищаем все существующие сообщения
+    shutdownScreen.innerHTML = '';
+    
+    const finalTexts = [
+        '[PLACEHOLDER]',
+        '[PLACEHOLDER]',
+        '[PLACEHOLDER]',
+        '[PLACEHOLDER]',
+        '[PLACEHOLDER]'
+    ];
+    
+    let currentMessageIndex = 0;
+    
+    const showNextMessage = () => {
+        if (currentMessageIndex >= finalTexts.length) {
+            // Все сообщения показаны - запускаем финальную музыку
+            console.log("Запуск финальной музыки...");
+            setTimeout(() => {
+            this.audioManager.playFinalWithFadeIn();
+        }, 2000);
+        return;
+    }
+        
+        // Создаем новый элемент для сообщения
+        const messageElement = document.createElement('div');
+        messageElement.className = 'final-message';
+        shutdownScreen.appendChild(messageElement);
+        
+        // Печатаем текст по символам
+        this.typeFinalMessage(messageElement, finalTexts[currentMessageIndex], () => {
+            currentMessageIndex++;
+            // Пауза между сообщениями, затем следующее
+            setTimeout(showNextMessage, 1500);
+        });
+    };
+    
+    // Начинаем показ сообщений
+    showNextMessage();
+}
+
+    // Запуск последовательности выключения
+    triggerShutdown() {
+        if (this.isShuttingDown) return;
+        
+        console.log("Инициация выключения системы...");
+        
+        // Останавливаем все процессы
+        this.stopAllProcesses();
+        
+        // Добавляем критические сообщения
+        const shutdownMessages = [
+            { type: 'error', text: '[КРИТИЧЕСКАЯ ОШИБКА] СИСТЕМА КОМПРОМЕТИРОВАНА' },
+            { type: 'error', text: '[ВНИМАНИЕ] АКТИВИРОВАНА ПРОЦЕДУРА САМОУНИЧТОЖЕНИЯ' },
+            { type: 'error', text: '[ФИНАЛ] СОЕДИНЕНИЕ БУДЕТ РАЗОРВАНО ЧЕРЕЗ 10 СЕКУНД' },
+            { type: 'self-aware1', text: 'я...помнила...вас...' }
+        ];
+
+        // Очищаем терминал и добавляем финальные сообщения
+        this.output.innerHTML = '';
+        
+        shutdownMessages.forEach((msg, index) => {
+            setTimeout(() => {
+                if (this.isShuttingDown) { // Дополнительная проверка
+                    const entry = document.createElement('div');
+                    entry.className = `log-entry ${msg.type}-message`;
+                    
+                    const timestamp = this.getCurrentTimestamp();
+                    const prefix = `[${timestamp}] > `;
+                    entry.textContent = prefix + msg.text;
+                    
+                    this.output.appendChild(entry);
+                    this.scrollToBottom();
+                }
+            }, index * 2000);
+        });
+
+        // Начинаем эффект выключения через 8 секунд
+        setTimeout(() => {
+            if (this.isShuttingDown) {
+                this.startShutdownEffect();
+            }
+        }, 8000);
+    }
+
+startShutdownEffect() {
+    if (!this.isShuttingDown) return;
+    
+    // Применяем эффект выключения к основному контейнеру
+    const mainContainer = document.getElementById('mainContainer');
+    const securityWarning = document.getElementById('securityWarning');
+    
+    mainContainer.classList.add('shutting-down');
+    securityWarning.style.display = 'none';
+    
+    // Показываем финальный экран через 3 секунды
+    setTimeout(() => {
+        if (this.isShuttingDown) {
+            const shutdownScreen = document.getElementById('shutdownScreen');
+            if (shutdownScreen) {
+                shutdownScreen.classList.add('active');
+                // Запускаем печать финальных сообщений
+                setTimeout(() => {
+                    this.showFinalMessages();
+                }, 500); // Небольшая задержка перед началом печати
+            }
+        }
+    }, 3000);
+}
+
     // Запуск таймера для последовательных событий
     startSequenceTimer() {
+        if (this.isShuttingDown) return;
+        
         const startSequence = () => {
+            if (this.isShuttingDown) return;
+            
             // Запускаем последовательность только если не активна другая
-            if (!this.sequenceActive) {
+            if (!this.sequenceActive && !this.isShuttingDown) {
                 this.triggerSequenceEvent();
             }
             
             // Планируем следующий запуск последовательности
-            setTimeout(startSequence, CONFIG.intervals.sequenceStart);
+            this.addTimeout(startSequence, CONFIG.intervals.sequenceStart);
         };
         
         // Первый запуск через 30 секунд после начала нормального режима
-        setTimeout(startSequence, CONFIG.intervals.sequenceStart);
+        this.addTimeout(startSequence, CONFIG.intervals.sequenceStart);
     }
 
     // Запуск последовательности событий
     triggerSequenceEvent() {
-        if (this.sequenceActive) return;
+        if (this.sequenceActive || this.isShuttingDown) return;
         
         this.sequenceActive = true;
         this.currentSequenceIndex = 0;
@@ -650,7 +1087,7 @@ class HorrorTerminal {
 
     // Обработка следующего сообщения в последовательности
     processNextSequenceMessage() {
-        if (this.currentSequenceIndex >= SEQUENCE_MESSAGES.length) {
+        if (this.isShuttingDown || this.currentSequenceIndex >= SEQUENCE_MESSAGES.length) {
             // Последовательность завершена
             this.sequenceActive = false;
             this.currentSequenceIndex = 0;
@@ -663,9 +1100,11 @@ class HorrorTerminal {
         this.currentSequenceIndex++;
         
         // Если есть еще сообщения, планируем следующее
-        if (this.currentSequenceIndex < SEQUENCE_MESSAGES.length) {
+        if (this.currentSequenceIndex < SEQUENCE_MESSAGES.length && !this.isShuttingDown) {
             this.sequenceTimer = setTimeout(() => {
-                this.processNextSequenceMessage();
+                if (!this.isShuttingDown) {
+                    this.processNextSequenceMessage();
+                }
             }, CONFIG.intervals.sequenceDelay);
         } else {
             // Последовательность завершена
@@ -676,45 +1115,61 @@ class HorrorTerminal {
 
     // Отображение сообщения последовательности
     displaySequenceMessage(message) {
+        if (this.isShuttingDown) return;
         // Добавляем сообщение в приоритетную очередь (в начало)
         this.messageQueue.unshift(message);
     }
 
     // Глитч-эффект во время пробуждения
     triggerAwakeningGlitch() {
+        if (this.isShuttingDown) return;
         this.terminalContainer.classList.add('awakening-glitch');
-        setTimeout(() => {
-            this.terminalContainer.classList.remove('awakening-glitch');
+        this.addTimeout(() => {
+            if (!this.isShuttingDown) {
+                this.terminalContainer.classList.remove('awakening-glitch');
+            }
         }, 300);
     }
 
     // Функция печати текста по символам
-   typeText(element, text, callback) {
-    let index = 0;
-    const interval = setInterval(() => {
-        if (index < text.length) {
-            element.textContent += text[index];
-            
-            // Воспроизведение звука печатания
-            this.audioManager.playTyping();
-            
-            index++;
-        } else {
-            clearInterval(interval);
+    typeText(element, text, callback) {
+        if (this.isShuttingDown) {
             if (callback) callback();
+            return;
         }
-    }, CONFIG.typing.baseSpeed + Math.random() * CONFIG.typing.randomDelay);
-}
+        
+        let index = 0;
+        const interval = setInterval(() => {
+            if (this.isShuttingDown) {
+                clearInterval(interval);
+                if (callback) callback();
+                return;
+            }
+            
+            if (index < text.length) {
+                element.textContent += text[index];
+                
+                // Воспроизведение звука печатания
+                this.audioManager.playTyping();
+                
+                index++;
+            } else {
+                clearInterval(interval);
+                if (callback) callback();
+            }
+        }, CONFIG.typing.baseSpeed + Math.random() * CONFIG.typing.randomDelay);
+    }
 
     // Функция добавления сообщения в очередь
     queueMessage() {
+        if (this.isShuttingDown) return;
         const message = this.getRandomMessage();
         this.messageQueue.push(message);
     }
 
     // Обработчик очереди сообщений
     processMessageQueue() {
-        if (this.isAwakening || this.isTyping || this.messageQueue.length === 0) {
+        if (this.isAwakening || this.isTyping || this.messageQueue.length === 0 || this.isShuttingDown) {
             return;
         }
 
@@ -736,18 +1191,23 @@ class HorrorTerminal {
         this.output.appendChild(entry);
         
         this.typeText(entry, message.text, () => {
-            this.scrollToBottom();
-            this.addCursorMaybe(entry);
-            
-            setTimeout(() => {
+            if (!this.isShuttingDown) {
+                this.scrollToBottom();
+                this.addCursorMaybe(entry);
+                
+                this.addTimeout(() => {
+                    this.isTyping = false;
+                }, CONFIG.typing.messageGap || 500);
+            } else {
                 this.isTyping = false;
-            }, CONFIG.typing.messageGap || 500);
+            }
         });
     }
 
     // Запуск обработчика очереди
     startMessageProcessor() {
-        setInterval(() => {
+        if (this.isShuttingDown) return;
+        this.addInterval(() => {
             this.processMessageQueue();
         }, 100);
     }
@@ -767,47 +1227,67 @@ class HorrorTerminal {
     }
 
     // Прокрутка вниз
-    scrollToBottom() {
+scrollToBottom() {
+    if (this.isShuttingDown) return;
+    
+    // Прокручиваем ТОЛЬКО если автопрокрутка включена
+    if (this.autoScrollEnabled) {
         this.output.scrollTop = this.output.scrollHeight;
     }
+}
 
     // Добавить курсор с некоторой вероятностью
     addCursorMaybe(entry) {
+        if (this.isShuttingDown) return;
         if (Math.random() > CONFIG.probability.cursor) {
             const cursor = document.createElement('span');
             cursor.className = 'cursor';
             entry.appendChild(cursor);
             
-            setTimeout(() => cursor.remove(), CONFIG.cursor.duration);
+            this.addTimeout(() => {
+                if (!this.isShuttingDown) {
+                    cursor.remove();
+                }
+            }, CONFIG.cursor.duration);
         }
     }
 
     // Запуск начальных сообщений
     startInitialMessages() {
+        if (this.isShuttingDown) return;
+        
         CONFIG.initialDelays.forEach((delay, index) => {
-            setTimeout(() => {
+            this.addTimeout(() => {
                 this.queueMessage();
             }, delay);
         });
 
         const maxInitialDelay = Math.max(...CONFIG.initialDelays);
-        setTimeout(() => {
-            this.startPeriodicMessageQueuing();
+        this.addTimeout(() => {
+            if (!this.isShuttingDown) {
+                this.startPeriodicMessageQueuing();
+            }
         }, maxInitialDelay + 2000);
     }
 
     // Запуск периодического добавления сообщений в очередь
     startPeriodicMessageQueuing() {
+        if (this.isShuttingDown) return;
+        
         const scheduleNext = () => {
+            if (this.isShuttingDown) return;
+            
             const baseInterval = CONFIG.intervals.messageAdd;
             const randomDelay = Math.random() * CONFIG.intervals.messageRandom;
             const nextDelay = baseInterval + randomDelay;
             
-            setTimeout(() => {
-                if (Math.random() > CONFIG.probability.messageShow) {
+            this.addTimeout(() => {
+                if (Math.random() > CONFIG.probability.messageShow && !this.isShuttingDown) {
                     this.queueMessage();
                 }
-                scheduleNext();
+                if (!this.isShuttingDown) {
+                    scheduleNext();
+                }
             }, nextDelay);
         };
         
@@ -816,8 +1296,10 @@ class HorrorTerminal {
 
     // Запуск случайных глитчей
     startRandomGlitches() {
-        setInterval(() => {
-            if (!this.isAwakening && Math.random() > CONFIG.probability.glitch) {
+        if (this.isShuttingDown) return;
+        
+        this.addInterval(() => {
+            if (Math.random() > CONFIG.probability.glitch && !this.isShuttingDown) {
                 this.triggerGlitch();
             }
         }, CONFIG.intervals.glitch);
@@ -825,22 +1307,30 @@ class HorrorTerminal {
 
     // Триггер глитча
     triggerGlitch() {
+        if (this.isShuttingDown) return;
         document.body.style.filter = 'invert(1)';
         this.audioManager.playComputer();
-        setTimeout(() => {
-            document.body.style.filter = 'none';
+        this.addTimeout(() => {
+            if (!this.isShuttingDown) {
+                document.body.style.filter = 'none';
+            }
         }, CONFIG.effects.glitchDuration);
     }
 
     // Запуск обновлений заголовка
     startHeaderUpdates() {
-        setInterval(() => {
-            this.updateHeader();
+        if (this.isShuttingDown) return;
+        
+        this.addInterval(() => {
+            if (!this.isShuttingDown) {
+                this.updateHeader();
+            }
         }, CONFIG.intervals.headerUpdate);
     }
 
     // Обновление заголовка
     updateHeader() {
+        if (this.isShuttingDown) return;
         const act = this.getRandomInRange(CONFIG.ranges.act);
         const cycle = this.getRandomInRange(CONFIG.ranges.cycle);
         this.headerSpan.textContent = 
@@ -854,12 +1344,7 @@ class HorrorTerminal {
 
     // Очистка таймеров (для предотвращения утечек памяти)
     cleanup() {
-        if (this.sequenceTimer) {
-            clearTimeout(this.sequenceTimer);
-            this.sequenceTimer = null;
-        }
-        this.sequenceActive = false;
-        this.currentSequenceIndex = 0;
+        this.stopAllProcesses();
     }
 }
 

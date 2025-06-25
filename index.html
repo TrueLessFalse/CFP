@@ -8,8 +8,23 @@
 </head>
 <body>
     <div class="noise"></div>
+
+    <!-- Предупреждение о безопасности -->
+    <div class="security-warning" id="securityWarning">
+        <div class="warning-title">⚠ НЕСАНКЦИОНИРОВАННЫЙ ДОСТУП ⚠ ОБНАРУЖЕН </div>
+        <div class="countdown-display">
+            [ОБРАТНЫЙ ОТСЧЁТ]<br>
+            До закрытия узла: <span class="countdown-value" id="countdownDisplay">Расчёт...</span>
+        </div>
+        <div class="destruction-warning">
+            [ВНИМАНИЕ] ЭТА п̵̽̊о̶̏͝п̷̇͋ы̶̑̅т̷̛̎к̵̕͘а̵͒̚  БУДЕТ УНИЧТОЖЕНА
+        </div>
+    </div>
+
+    <div class="spa-loader" id="spaLoader">ЗАГРУЗКА СИСТЕМЫ...</div>
+    
 <audio id="backgroundMusic" loop preload="auto">
-    <source src="Sounds/vhs-succession.mp3" type="audio/mp3">
+    <source src="Sounds/vhs_succession.wav" type="audio/wav">
 </audio>
 <audio id="typingSound1" preload="auto">
     <source src="Sounds/B1.wav" type="audio/wav">
@@ -37,13 +52,16 @@
 <audio id="computerSound" loop preload="auto">
     <source src="Sounds/working.wav" type="audio/wav">
 </audio>
-    <div class="spa-loader" id="spaLoader">ЗАГРУЗКА СИСТЕМЫ...</div>
+<audio id="finalMusic" loop preload="auto">
+    <source src="Sounds/end.wav" type="audio/wav">
+</audio>
+
 
       <div class="main-container" id="mainContainer" style="display: none;">
     <!-- Левая часть с логотипом -->
     <div class="logo-container">
         <img src="images/CIA.png" alt="CARCOSA FACILITY" class="logo-image" id="logoImage">
-<!-- [ENIGMA]: M3 UKW B yjxxw://jcstxoqdkyexj.enhcig.wg/azw/mzsiyo/zlyxl.kpp -->
+        <!-- [ENIGMA]: M3 UKW B yjxxw://jcstxoqdkyexj.enhcig.wg/azw/mzsiyo/zlyxl.kpp -->
         <div class="logo-text">
             CARCOSA<br>
             FACILITY<br>
@@ -60,6 +78,10 @@
             <!-- Логи будут появляться здесь -->
         </div>
     </div>
+</div>
+
+<div class="shutdown-screen" id="shutdownScreen">
+    <!-- Сообщения будут добавляться динамически -->
 </div>
 
     <script src="script.js"></script>
