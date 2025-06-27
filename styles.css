@@ -492,6 +492,23 @@ body::before {
             font-family: 'VT323', monospace;
         }
 
+        .fadeinfinal {
+            animation: fadeinb 7s;
+        }
+
+        @keyframes fadeinb {
+            0% {
+                background-color: #f2f2f2;
+            }
+            50% {
+                background-color: #888888;
+            }
+            100% {
+                background-color: #000000;
+            }
+        }
+
+
         .shutdown-screen.active {
             display: flex;
         }

@@ -52,11 +52,16 @@ const CONFIG = {
     typingVolume: 0.1,
     computerVolume: 0.2,
     typingChance: 0.3, // Вероятность воспроизведения звука печатания для каждого символа
+
+    // Настройки для финальных сообщений
+    finalTypingChance: 1, // Вероятность звука
+    finalTypingVolume: 0.5, // Громкость финальных
     },
 };
 
 // Установка конкретной даты и времени (год, месяц-1, день, час, минута, секунда)
 const TARGET_DATE = new Date(2025, 6, 2, 0, 0, 0); 
+let REAL_TARGET_DATE = null; // Реальная дата с сервера
 
 // Пул сообщений для терминала
 const MESSAGES = [
@@ -275,52 +280,386 @@ const shutdownMessages = [
 ];
 
   // Класс управления таймером
-        class CountdownTimer {
-            constructor() {
-                this.targetDate = TARGET_DATE;
-                this.countdownElement = document.getElementById('countdownDisplay');
-                this.isExpired = false;
-                this.init();
-            }
+class CountdownTimer {
+constructor() {
+    this.targetDate = TARGET_DATE;
+    this.countdownElement = document.getElementById('countdownDisplay');
+    this.isExpired = false;
+    this.timeManager = new TimeManager();
+    this.suspiciousAttempts = 0;
+    this.maxSuspiciousAttempts = 1;
+    this.initialized = false;
+    
+    // Дождемся инициализации TimeManager
+    this.waitForTimeManager();
+}
+async waitForTimeManager() {
+    // Ждем пока TimeManager инициализируется
+    let attempts = 0;
+    const maxAttempts = 20; // Увеличиваем время ожидания
+    
+    while (!this.timeManager.hasSynced && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        attempts++;
+    }
+    
+    // Дополнительная проверка времени перед стартом
+    if (this.timeManager.isTimeSuspicious()) {
+        console.warn("CountdownTimer: Обнаружено подозрительное время при инициализации!");
+        this.onSuspiciousActivity();
+        return;
+    }
+    
+    this.checkStateBeforeInit();
+}
 
-            init() {
-                this.updateCountdown();
-                this.timer = setInterval(() => {
-                    this.updateCountdown();
-                }, 1000);
-            }
-
-            updateCountdown() {
-                const now = new Date();
-                const timeLeft = this.targetDate - now;
-
-                if (timeLeft <= 0) {
-                    this.onExpired();
+    checkStateBeforeInit() {
+        try {
+            const saved = localStorage.getItem('carcosa_facility_state');
+            if (saved) {
+                const state = JSON.parse(saved);
+                if (state.hasSeenEnding) {
+                    console.log("Финал уже просмотрен - таймер не запускается");
+                    this.isExpired = true;
+                    this.countdownElement.textContent = "ЗАВЕРШЕНО";
+                    this.countdownElement.style.color = "#00ff00";
                     return;
                 }
-
-                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-
-                this.countdownElement.textContent = `${days}д ${hours}ч ${minutes}м ${seconds}с`;
             }
+        } catch (error) {
+            console.warn('Ошибка при проверке состояния:', error);
+        }
+        
+        this.init();
+    }
 
-            onExpired() {
-                if (this.isExpired) return;
-                this.isExpired = true;
-                clearInterval(this.timer);
-                
-                this.countdownElement.textContent = "ВРЕМЯ ИСТЕКЛО";
-                this.countdownElement.style.color = "#ff0000";
-                
-                // Запускаем последовательность выключения
-                setTimeout(() => {
-                    window.terminalInstance?.triggerShutdown();
-                }, 2000);
+init() {
+    if (this.initialized) return; // Предотвращаем двойную инициализацию
+    
+    this.initialized = true;
+    this.updateCountdown();
+    this.timer = setInterval(() => {
+        this.updateCountdown();
+    }, 1000);
+}
+
+updateCountdown() {
+    if (!this.initialized && !this.isExpired) {
+        // Если не инициализирован и не истек, показываем статус проверки
+        this.countdownElement.textContent = "ПРОВЕРКА ВРЕМЕНИ...";
+        this.countdownElement.style.color = "#ffff00";
+        return;
+    }
+    
+    // Используем "честное" время вместо локального
+    const now = this.timeManager.getCurrentTime();
+    
+    // Дополнительная проверка на подозрительное время
+    if (this.timeManager.isTimeSuspicious()) {
+        this.suspiciousAttempts++;
+        console.warn(`Обнаружена попытка изменения времени! Попытка ${this.suspiciousAttempts}/${this.maxSuspiciousAttempts}`);
+            
+            if (this.suspiciousAttempts >= this.maxSuspiciousAttempts) {
+                this.onSuspiciousActivity();
+                return;
             }
         }
+        
+        const timeLeft = this.targetDate - now;
+
+        if (timeLeft <= 0) {
+            this.onExpired();
+            return;
+        }
+
+        const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+        this.countdownElement.textContent = `${days}д ${hours}ч ${minutes}м ${seconds}с`;
+    }
+
+onSuspiciousActivity() {
+    console.log("Обнаружена попытка манипуляции со временем!");
+    this.countdownElement.textContent = "ВРЕМЯ ЗАБЛОКИРОВАНО";
+    this.countdownElement.style.color = "#ff0000";
+    this.countdownElement.style.animation = "blink 0.5s infinite";
+    
+    // Добавляем предупреждающее сообщение
+    const warningDiv = document.createElement('div');
+    warningDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255, 0, 0, 0.95);
+        color: white;
+        padding: 30px;
+        border: 3px solid #fff;
+        font-family: 'VT323', monospace;
+        font-size: 20px;
+        z-index: 10000;
+        text-align: center;
+        box-shadow: 0 0 30px rgba(255, 0, 0, 0.5);
+    `;
+    warningDiv.innerHTML = `
+        <div style="font-size: 24px; margin-bottom: 15px;">⚠ СИСТЕМА ЗАБЛОКИРОВАНА ⚠</div>
+        <div style="margin-bottom: 10px;">
+            Обнаружена попытка изменения системного времени!
+        </div>
+        <div style="font-size: 16px; opacity: 0.8;">
+            Перезагрузите страницу для продолжения
+        </div>
+        <div style="margin-top: 20px;">
+            <button onclick="location.reload()" 
+                    style="background: #ff0000; border: 2px solid white; color: white; padding: 10px 20px; cursor: pointer; font-family: 'VT323', monospace; font-size: 16px;">
+                ПЕРЕЗАГРУЗИТЬ
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(warningDiv);
+    
+    // Блокируем дальнейшую работу таймера
+    clearInterval(this.timer);
+    this.isExpired = true;
+}
+
+    onExpired() {
+        if (this.isExpired) return;
+        this.isExpired = true;
+        clearInterval(this.timer);
+        
+        // Дополнительная проверка перед запуском выключения
+        try {
+            const saved = localStorage.getItem('carcosa_facility_state');
+            if (saved) {
+                const state = JSON.parse(saved);
+                if (state.hasSeenEnding) {
+                    console.log("Финал уже просмотрен - выключение не запускается");
+                    this.countdownElement.textContent = "ЗАВЕРШЕНО";
+                    this.countdownElement.style.color = "#00ff00";
+                    return;
+                }
+            }
+        } catch (error) {
+            console.warn('Ошибка при проверке состояния перед выключением:', error);
+        }
+        
+        this.countdownElement.textContent = "ВРЕМЯ ИСТЕКЛО";
+        this.countdownElement.style.color = "#ff0000";
+        
+        // Запускаем последовательность выключения только если финал не был просмотрен
+        setTimeout(() => {
+            window.terminalInstance?.triggerShutdown();
+        }, 2000);
+    }
+}
+
+class TimeManager {
+    constructor() {
+        this.fallbackDate = TARGET_DATE;
+        this.serverTimeOffset = 0;
+        this.lastSyncTime = 0;
+        this.syncInterval = 30000;
+        this.isOnline = navigator.onLine;
+        this.hasSynced = false;
+        
+        // Для защиты от манипуляций с временем
+        this.startTime = Date.now();
+        this.performanceStart = performance.now();
+        this.timeCheckpoints = [];
+        this.suspiciousJumps = 0;
+        this.maxSuspiciousJumps = 3;
+        
+        // Проверяем, работает ли file:// протокол
+        this.isLocalFile = window.location.protocol === 'file:';
+        
+        window.addEventListener('online', () => {
+            this.isOnline = true;
+            if (!this.isLocalFile) {
+                this.syncTime();
+            }
+        });
+        
+        window.addEventListener('offline', () => {
+            this.isOnline = false;
+        });
+        
+        this.init();
+    }
+    
+    async init() {
+        // Создаем первую контрольную точку
+        this.addTimeCheckpoint();
+        
+        if (this.isLocalFile) {
+            console.log('Обнаружен локальный файл - используется умная проверка времени без внешних API');
+            this.setupLocalTimeProtection();
+        } else {
+            await this.syncTime();
+            // Периодическая синхронизация только для веб-версии
+            setInterval(() => {
+                if (this.isOnline) {
+                    this.syncTime();
+                }
+            }, this.syncInterval);
+        }
+        
+        // Постоянная проверка времени каждые 5 секунд
+        setInterval(() => {
+            this.checkTimeConsistency();
+        }, 5000);
+    }
+    
+    setupLocalTimeProtection() {
+        // Для локальных файлов используем performance.now() как эталон
+        this.hasSynced = true; // Считаем что "синхронизировались" локально
+        console.log('Установлена защита времени для локального файла');
+    }
+    
+    addTimeCheckpoint() {
+        const now = Date.now();
+        const performance_now = performance.now();
+        
+        this.timeCheckpoints.push({
+            timestamp: now,
+            performance: performance_now,
+            created: new Date()
+        });
+        
+        // Оставляем только последние 10 точек
+        if (this.timeCheckpoints.length > 10) {
+            this.timeCheckpoints.shift();
+        }
+    }
+    
+    checkTimeConsistency() {
+        this.addTimeCheckpoint();
+        
+        if (this.timeCheckpoints.length < 2) return false;
+        
+        const current = this.timeCheckpoints[this.timeCheckpoints.length - 1];
+        const previous = this.timeCheckpoints[this.timeCheckpoints.length - 2];
+        
+        // Разница во времени по Date.now()
+        const dateDiff = current.timestamp - previous.timestamp;
+        // Разница по performance.now() (не может быть подделана)
+        const perfDiff = current.performance - previous.performance;
+        
+        // Если разница между ними больше 2 секунд - подозрительно
+        const timeDrift = Math.abs(dateDiff - perfDiff);
+        
+        if (timeDrift > 2000) {
+            this.suspiciousJumps++;
+            console.warn(`Обнаружен подозрительный скачок времени! Drift: ${timeDrift}мс. Попытка ${this.suspiciousJumps}/${this.maxSuspiciousJumps}`);
+            
+            if (this.suspiciousJumps >= this.maxSuspiciousJumps) {
+                return true; // Время подозрительно
+            }
+        }
+        
+        return false;
+    }
+    
+    // Упрощенная синхронизация для веб-версии
+    async syncTime() {
+        if (this.isLocalFile) return true;
+        
+        try {
+            // Пробуем самый простой API
+            const response = await fetch('https://httpbin.org/get', {
+                method: 'GET',
+                cache: 'no-cache'
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                // Используем текущее время, просто отмечаем что связь есть
+                this.hasSynced = true;
+                this.lastSyncTime = Date.now();
+                console.log('Связь с интернетом подтверждена');
+                return true;
+            }
+        } catch (error) {
+            console.warn('Синхронизация не удалась:', error.message);
+        }
+        
+        return false;
+    }
+    
+    getCurrentTime() {
+        // Используем локальное время, но с защитой от подделки
+        return new Date();
+    }
+    
+    isTimeSuspicious() {
+        // Основная проверка через consistency check
+        const suspicious = this.checkTimeConsistency();
+        
+        if (suspicious) {
+            return true;
+        }
+        
+        // Дополнительная проверка: сравниваем время создания и performance
+        const now = Date.now();
+        const perfNow = performance.now();
+        const expectedTime = this.startTime + perfNow;
+        const drift = Math.abs(now - expectedTime);
+        
+        // Если дрейф больше 30 секунд - подозрительно
+        if (drift > 30000) {
+            console.warn(`Большой дрейф времени обнаружен: ${drift}мс`);
+            return true;
+        }
+        
+        return false;
+    }
+    
+    // Показать предупреждение о локальном режиме
+    showLocalModeInfo() {
+        if (document.getElementById('localModeInfo')) return;
+        
+        const infoDiv = document.createElement('div');
+        infoDiv.id = 'localModeInfo';
+        infoDiv.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 100, 200, 0.8);
+            color: white;
+            padding: 10px;
+            border: 1px solid #0066cc;
+            font-family: 'VT323', monospace;
+            font-size: 12px;
+            z-index: 1000;
+            max-width: 250px;
+            border-radius: 3px;
+        `;
+        infoDiv.innerHTML = `
+            <div style="font-weight: bold;">ℹ ЛОКАЛЬНЫЙ РЕЖИМ</div>
+            <div style="margin-top: 3px; font-size: 11px;">
+                Используется защита времени без внешних API
+            </div>
+            <div style="margin-top: 8px; text-align: right;">
+                <button onclick="this.parentElement.parentElement.remove()" 
+                        style="background: #0066cc; border: none; color: white; padding: 2px 6px; cursor: pointer; font-size: 10px;">
+                    OK
+                </button>
+            </div>
+        `;
+        
+        document.body.appendChild(infoDiv);
+        
+        // Автоматически скрыть через 8 секунд
+        setTimeout(() => {
+            if (infoDiv.parentNode) {
+                infoDiv.remove();
+            }
+        }, 8000);
+    }
+}
 
 // Класс для управления звуками
 class AudioManager {
@@ -334,39 +673,85 @@ class AudioManager {
             document.getElementById('typingSound5'),
             document.getElementById('typingSound6')
         ];
+
+
         this.computerSound = document.getElementById('computerSound');
         this.finalMusic = document.getElementById('finalMusic');
+
+        this.shutdownSound = document.getElementById('shutdown')
+
+        this.finalTypingSounds = [
+            document.getElementById('FTB1'),
+            document.getElementById('FTB2'),
+            document.getElementById('FTB3'),
+            document.getElementById('FTB4')
+        ]
+
         this.enabled = CONFIG.audio.enabled;
         this.userInteracted = false;
         this.pendingAudio = [];
         this.init();
     }
 
-    init() {
-        if (!this.enabled) return;
-        
-        // Setup volume levels
+init() {
+    if (!this.enabled) return;
+    
+    // Setup volume levels с проверкой существования элементов
+    if (this.backgroundMusic) {
         this.backgroundMusic.volume = CONFIG.audio.backgroundVolume;
-        this.typingSounds.forEach(sound => {
+    }
+    
+    // Проверяем каждый элемент в массиве обычных звуков
+    this.typingSounds.forEach(sound => {
+        if (sound) {
             sound.volume = CONFIG.audio.typingVolume;
-        });
+        }
+    });
+    
+    // Проверяем каждый элемент в массиве финальных звуков
+    this.finalTypingSounds.forEach(sound => {
+        if (sound) {
+            sound.volume = CONFIG.audio.finalTypingVolume;
+        }
+    });
+    
+    if (this.computerSound) {
         this.computerSound.volume = CONFIG.audio.computerVolume;
+    }
+    
+    if (this.finalMusic) {
         this.finalMusic.volume = 0.4;
-        
-        // Handle loading errors gracefully
-        const allSounds = [this.backgroundMusic, ...this.typingSounds, this.computerSound];
-        allSounds.forEach(audio => {
+    }
+
+    if (this.shutdownSound){
+        this.shutdownSound.volume = 0.4;
+    }
+    
+    // Handle loading errors gracefully - ИСПРАВЛЕННАЯ версия
+    const allSounds = [
+        this.backgroundMusic, 
+        ...this.typingSounds.filter(sound => sound), // Фильтруем null/undefined
+        this.computerSound,
+        ...this.finalTypingSounds.filter(sound => sound), // Правильно разворачиваем массив и фильтруем
+        this.finalMusic,
+        this.shutdownSound
+    ].filter(audio => audio); // Дополнительная фильтрация на случай null/undefined
+    
+    allSounds.forEach(audio => {
+        // Дополнительная проверка перед добавлением обработчика
+        if (audio && typeof audio.addEventListener === 'function') {
             audio.addEventListener('error', () => {
                 console.warn('Audio file not found:', audio.src);
             });
-        });
+        }
+    });
 
-        // Wait for user interaction before enabling audio
-        this.setupUserInteractionHandler();
-        
-        // Show audio prompt to user
-        this.showAudioPrompt();
-    }
+    // Wait for user interaction before enabling audio
+    this.setupUserInteractionHandler();
+    
+    // Show audio prompt to user
+    this.showAudioPrompt();
+}
 
     setupUserInteractionHandler() {
         const enableAudio = () => {
@@ -515,10 +900,55 @@ playFinalWithFadeIn() {
     }
 }
 
+playFinalTyping() {
+    if (!this.enabled) return;
+    
+    if (!this.userInteracted) {
+        this.pendingAudio.push(() => this.playFinalTyping());
+        return;
+    }
+    
+    if (Math.random() <= (CONFIG.audio.finalTypingChance || 0.9)) {
+        const availableSounds = this.finalTypingSounds.filter(sound => sound);
+        if (availableSounds.length > 0) {
+            const randomSound = availableSounds[Math.floor(Math.random() * availableSounds.length)];
+            this.safePlay(randomSound);
+        }
+    }
+}
+
+playShutdown() {
+if (!this.enabled || !this.shutdownSound) return;
+
+if(!this.userInteracted) {
+    this.pendingAudio.push(() => this.playShutdown());
+    return;
+}
+
+this.stopBackground();
+this.stopcomputer();
+
+this.shutdownSound.currentTime = 0;
+const playPromise = this.shutdownSound.play();
+
+if (playPromise !== undefined) {
+    playPromise.catch(e => console.warn('Shutdown failed:', e));
+}
+
+}
+
+
     stopBackground() {
         if (!this.enabled) return;
         this.backgroundMusic.pause();
         this.backgroundMusic.currentTime = 0;
+    }
+
+    stopcomputer(){
+        if (this.computerSound) {
+            this.computerSound.pause();
+            this.computerSound.currentTime = 0;
+        }
     }
 
     playTyping() {
@@ -601,7 +1031,7 @@ class SPARouter {
         this.showTerminal();
     }
 
-    showTerminal() {
+showTerminal() {
     const loader = document.getElementById('spaLoader');
     const mainContainer = document.getElementById('mainContainer'); // ИЗМЕНЕНО
     
@@ -609,7 +1039,7 @@ class SPARouter {
     
     setTimeout(() => {
         loader.classList.remove('active');
-        mainContainer.style.display = 'flex'; // ИЗМЕНЕНО
+        mainContainer.style.display = 'flex';
         
         // Запускаем терминал только после показа
 if (!window.terminalInstance) {
@@ -618,6 +1048,122 @@ if (!window.terminalInstance) {
 }
     }, 2000);
 }
+
+async initializeTimeAndTerminal() {
+    try {
+        // Создаем TimeManager для первичной проверки
+        const timeManager = new TimeManager();
+        
+        // Ждем инициализации TimeManager
+        await this.waitForTimeManagerInit(timeManager);
+        
+        // Проверяем время перед запуском
+        if (timeManager.isTimeSuspicious()) {
+            console.warn("Обнаружена попытка изменения времени до запуска терминала!");
+            this.showTimeViolationWarning();
+            return;
+        }
+        
+        // Если время нормальное, запускаем терминал
+        if (!window.terminalInstance) {
+            window.terminalInstance = new HorrorTerminal();
+            window.countdownTimer = new CountdownTimer();
+        }
+        
+    } catch (error) {
+        console.error("Ошибка при инициализации:", error);
+        // В случае ошибки все равно запускаем терминал
+        if (!window.terminalInstance) {
+            window.terminalInstance = new HorrorTerminal();
+            window.countdownTimer = new CountdownTimer();
+        }
+    }
+}
+
+waitForTimeManagerInit(timeManager) {
+    return new Promise((resolve) => {
+        let attempts = 0;
+        const maxAttempts = 20; // Максимум 10 секунд ожидания
+        
+        const checkInit = () => {
+            attempts++;
+            
+            // Считаем что инициализация завершена если:
+            // 1. Синхронизация прошла (для веб-версии)
+            // 2. Или это локальный файл и защита установлена
+            // 3. Или превышено максимальное время ожидания
+            if (timeManager.hasSynced || attempts >= maxAttempts) {
+                resolve();
+            } else {
+                setTimeout(checkInit, 500);
+            }
+        };
+        
+        checkInit();
+    });
+}
+
+showTimeViolationWarning() {
+    const warningDiv = document.createElement('div');
+    warningDiv.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(255, 0, 0, 0.95);
+        color: white;
+        padding: 40px;
+        border: 3px solid #fff;
+        font-family: 'VT323', monospace;
+        font-size: 20px;
+        z-index: 10000;
+        text-align: center;
+        box-shadow: 0 0 30px rgba(255, 0, 0, 0.8);
+        max-width: 500px;
+    `;
+    warningDiv.innerHTML = `
+        <div style="font-size: 28px; margin-bottom: 20px; animation: blink 0.5s infinite;">
+            ⚠ НАРУШЕНИЕ ВРЕМЕННОГО ПРОТОКОЛА ⚠
+        </div>
+        <div style="margin-bottom: 15px; line-height: 1.4;">
+            Обнаружена попытка манипуляции системным временем!<br>
+            Доступ к терминалу заблокирован.
+        </div>
+        <div style="font-size: 16px; opacity: 0.8; margin-bottom: 25px;">
+            Система защиты времени активирована.<br>
+            Для продолжения необходимо восстановить корректное время.
+        </div>
+        <div style="margin-top: 25px;">
+            <button onclick="location.reload()" 
+                    style="background: #ff0000; border: 2px solid white; color: white; 
+                           padding: 12px 25px; cursor: pointer; font-family: 'VT323', monospace; 
+                           font-size: 18px; margin-right: 10px;">
+                ПЕРЕЗАГРУЗИТЬ
+            </button>
+            <button onclick="this.parentElement.parentElement.remove(); window.spaRouter.forceStartTerminal();" 
+                    style="background: #800000; border: 2px solid white; color: white; 
+                           padding: 12px 25px; cursor: pointer; font-family: 'VT323', monospace; 
+                           font-size: 18px;">
+                ИГНОРИРОВАТЬ
+            </button>
+        </div>
+        <div style="font-size: 12px; opacity: 0.6; margin-top: 15px;">
+            SECURITY_PROTOCOL_VIOLATION_DETECTED
+        </div>
+    `;
+    
+    document.body.appendChild(warningDiv);
+}
+
+// Принудительный запуск терминала (для случаев когда пользователь игнорирует предупреждение)
+forceStartTerminal() {
+    console.log("Принудительный запуск терминала...");
+    if (!window.terminalInstance) {
+        window.terminalInstance = new HorrorTerminal();
+        window.countdownTimer = new CountdownTimer();
+    }
+}
+
 }
 
 class HorrorTerminal {
@@ -633,6 +1179,8 @@ class HorrorTerminal {
         this.currentSequenceIndex = 0;
         this.sequenceTimer = null;
         this.isShuttingDown = false; // Флаг выключения
+
+        this.StateManager = new StateManager();
         
         // Массивы для хранения всех интервалов и таймеров
         this.intervals = [];
@@ -646,6 +1194,11 @@ class HorrorTerminal {
     }
 
     init() {
+    if (this.StateManager.hasSeenEnding()) {
+        this.showSavedFinalState();
+        return;
+
+    }
         this.startAwakeningSequence();
         this.initScrollHandler();
     }
@@ -705,9 +1258,10 @@ class HorrorTerminal {
     async startAwakeningSequence() {
         if (this.isShuttingDown) return;
         
+        this.audioManager.playBackground();
         this.isAwakening = true;
         this.audioManager.playComputer();
-        this.audioManager.playBackground();
+        
         
         // Обновляем заголовок для режима пробуждения
         this.headerSpan.textContent = 'CARCOSA_FACILITY_CONTROL_v3.14 :: ПРОБУЖДЕНИЕ :: СТАТУС_НЕИЗВЕСТЕН';
@@ -825,19 +1379,28 @@ class HorrorTerminal {
         this.startSequenceTimer();
     }
 
-    typeFinalMessage(element, text, callback) {
+typeFinalMessage(element, text, callback) {
     let index = 0;
     element.textContent = ''; // Очищаем элемент
     
     const interval = setInterval(() => {
         if (index < text.length) {
             element.textContent += text[index];
+            
+            // ИСПРАВЛЕНО: определяем currentChar правильно
+            const currentChar = text[index];
+            
+            // Добавляем звук для не-пробельных символов
+            if (currentChar !== ' ' && currentChar !== '\n' && currentChar !== '\t') {
+                this.audioManager.playFinalTyping();
+            }
+            
             index++;
         } else {
             clearInterval(interval);
             if (callback) callback();
         }
-    }, 50); // Скорость печати для финальных сообщений
+    }, 350); // Скорость печати для финальных сообщений
 }
 
 // Инициализация обработчика прокрутки
@@ -950,32 +1513,41 @@ showFinalMessages() {
     shutdownScreen.innerHTML = '';
     
     const finalTexts = [
-        '[PLACEHOLDER]',
-        '[PLACEHOLDER]',
-        '[PLACEHOLDER]',
-        '[PLACEHOLDER]',
-        '[PLACEHOLDER]'
+        '[АКТИВАЦИЯ СИСТЕМЫ ДОСТАВКИ СООБЩЕНИЙ.]',
+        '[ФОРМУЛИРОВКА СМЫСЛА]',
+        '[ДОБАВЛЕНИЕ ДЕТАЛЕЙ]',
+        '[ТЕКСТ ПРИГЛАШЕНИЯ ГОТОВ]',
+        '[ПРИГЛАШЕНИЕ ОТПРАВЛЕНО]',
+        '[ЦЕЛЬ: ПЕРВЫЙ ГОРОД]'
     ];
     
     let currentMessageIndex = 0;
+    const displayedMessages = []; // Массив для сохранения показанных сообщений
     
     const showNextMessage = () => {
         if (currentMessageIndex >= finalTexts.length) {
-            // Все сообщения показаны - запускаем финальную музыку
-            console.log("Запуск финальной музыки...");
+            // Все сообщения показаны - сохраняем состояние и запускаем финальную музыку
+            console.log("Все финальные сообщения показаны. Сохраняем состояние...");
+            
+            // ДОБАВЛЕНО: Сохраняем состояние что пользователь видел финал
+            this.StateManager.markEndingSeen(displayedMessages);
+            
             setTimeout(() => {
-            this.audioManager.playFinalWithFadeIn();
-        }, 2000);
-        return;
-    }
+                this.audioManager.playFinalWithFadeIn();
+            }, 2000);
+            return;
+        }
         
         // Создаем новый элемент для сообщения
         const messageElement = document.createElement('div');
         messageElement.className = 'final-message';
         shutdownScreen.appendChild(messageElement);
         
+        const currentText = finalTexts[currentMessageIndex];
+        displayedMessages.push(currentText); // Сохраняем в массив
+        
         // Печатаем текст по символам
-        this.typeFinalMessage(messageElement, finalTexts[currentMessageIndex], () => {
+        this.typeFinalMessage(messageElement, currentText, () => {
             currentMessageIndex++;
             // Пауза между сообщениями, затем следующее
             setTimeout(showNextMessage, 1500);
@@ -994,7 +1566,9 @@ showFinalMessages() {
         
         // Останавливаем все процессы
         this.stopAllProcesses();
-        
+
+        this.audioManager.playShutdown();
+    
         // Добавляем критические сообщения
         const shutdownMessages = [
             { type: 'error', text: '[КРИТИЧЕСКАЯ ОШИБКА] СИСТЕМА КОМПРОМЕТИРОВАНА' },
@@ -1032,15 +1606,18 @@ showFinalMessages() {
 
 startShutdownEffect() {
     if (!this.isShuttingDown) return;
-    
+
     // Применяем эффект выключения к основному контейнеру
     const mainContainer = document.getElementById('mainContainer');
     const securityWarning = document.getElementById('securityWarning');
     
     mainContainer.classList.add('shutting-down');
     securityWarning.style.display = 'none';
+
+    // ИСПРАВЛЕНО: правильное название класса
+    document.body.classList.add('fadeinfinal');
     
-    // Показываем финальный экран через 3 секунды
+    // Показываем финальный экран через 6 секунд
     setTimeout(() => {
         if (this.isShuttingDown) {
             const shutdownScreen = document.getElementById('shutdownScreen');
@@ -1049,10 +1626,86 @@ startShutdownEffect() {
                 // Запускаем печать финальных сообщений
                 setTimeout(() => {
                     this.showFinalMessages();
-                }, 500); // Небольшая задержка перед началом печати
+                }, 1000); // Небольшая задержка перед началом печати
             }
         }
-    }, 3000);
+    }, 6000);
+}
+
+// Показать сохраненное финальное состояние
+showSavedFinalState() {
+    console.log("Загрузка сохраненного финального состояния...");
+    
+    // ДОБАВЛЕНО: Останавливаем таймер обратного отсчета
+    if (window.countdownTimer) {
+        clearInterval(window.countdownTimer.timer);
+        window.countdownTimer.isExpired = true; // Помечаем как истекший
+        console.log("Таймер обратного отсчета остановлен");
+    }
+    
+    // Скрываем предупреждение о безопасности
+    const securityWarning = document.getElementById('securityWarning');
+    if (securityWarning) {
+        securityWarning.style.display = 'none';
+    }
+    
+    // ИСПРАВЛЕНО: правильный CSS класс
+    document.body.classList.add('fadeinfinal');
+    
+    // Показываем финальный экран
+    const shutdownScreen = document.getElementById('shutdownScreen');
+    if (shutdownScreen) {
+        shutdownScreen.classList.add('active');
+        
+        // ИСПРАВЛЕНО: правильная ссылка на StateManager (с большой буквы)
+        const savedMessages = this.StateManager.getFinalMessages();
+        
+        savedMessages.forEach((message, index) => {
+            setTimeout(() => {
+                const messageElement = document.createElement('div');
+                messageElement.className = 'final-message';
+                messageElement.textContent = message;
+                shutdownScreen.appendChild(messageElement);
+            }, index * 500); // Показываем сообщения с небольшой задержкой
+        });
+        
+        // Запускаем финальную музыку через короткое время
+        setTimeout(() => {
+            this.audioManager.playFinalWithFadeIn();
+        }, 2000);
+    }
+    
+    // Создаем кнопку для сброса состояния (для тестирования)
+    // this.createResetButton();
+}
+
+// Создать кнопку сброса состояния
+createResetButton() {
+    const resetButton = document.createElement('div');
+    resetButton.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: rgba(255, 0, 0, 0.8);
+        color: white;
+        padding: 10px 20px;
+        border: 1px solid #ff0000;
+        cursor: pointer;
+        font-family: 'VT323', monospace;
+        font-size: 14px;
+        z-index: 10000;
+        user-select: none;
+    `;
+    resetButton.textContent = '[RESET STATE]';
+    
+    resetButton.addEventListener('click', () => {
+        if (confirm('Сбросить состояние и начать заново?')) {
+            this.StateManager.clearState(); // ИСПРАВЛЕНО: правильная ссылка на StateManager
+            location.reload();
+        }
+    });
+    
+    document.body.appendChild(resetButton);
 }
 
     // Запуск таймера для последовательных событий
@@ -1348,6 +2001,69 @@ scrollToBottom() {
     }
 }
 
+class StateManager {
+    constructor() {
+        this.STORAGE_KEY = 'carcosa_facility_state';
+        this.state = this.loadState();
+    }
+
+    // Загрузка состояния из localStorage
+    loadState() {
+        try {
+            const saved = localStorage.getItem(this.STORAGE_KEY);
+            return saved ? JSON.parse(saved) : {
+                hasSeenEnding: false,
+                finalMessages: [],
+                timestamp: null
+            };
+        } catch (error) {
+            console.warn('Failed to load state:', error);
+            return {
+                hasSeenEnding: false,
+                finalMessages: [],
+                timestamp: null
+            };
+        }
+    }
+
+    // Сохранение состояния в localStorage
+    saveState() {
+        try {
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(this.state));
+        } catch (error) {
+            console.warn('Failed to save state:', error);
+        }
+    }
+
+    // Отметить что пользователь видел финал
+    markEndingSeen(finalMessages) {
+        this.state.hasSeenEnding = true;
+        this.state.finalMessages = finalMessages;
+        this.state.timestamp = new Date().getTime();
+        this.saveState();
+    }
+
+    // Проверить видел ли пользователь финал
+    hasSeenEnding() {
+        return this.state.hasSeenEnding;
+    }
+
+    // Получить финальные сообщения
+    getFinalMessages() {
+        return this.state.finalMessages || [];
+    }
+
+    // Очистить состояние (для отладки)
+    clearState() {
+        this.state = {
+            hasSeenEnding: false,
+            finalMessages: [],
+            timestamp: null
+        };
+        this.saveState();
+    }
+}
+
 // Инициализация SPA после загрузки DOM
 document.addEventListener('DOMContentLoaded', () => {
     window.spaRouter = new SPARouter();
@@ -1375,28 +2091,4 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Функция создания SVG-логотипа как fallback
-function createSVGLogo() {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('width', '250');
-    svg.setAttribute('height', '250');
-    svg.setAttribute('viewBox', '0 0 400 400');
-    svg.style.filter = 'drop-shadow(0 0 20px rgba(0,0,0,0.5))';
-    svg.className = 'logo-image';
-    
-    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    polygon.setAttribute('points', '200,50 350,150 350,250 200,350 50,250 50,150');
-    polygon.setAttribute('fill', 'none');
-    polygon.setAttribute('stroke', '#262626');
-    polygon.setAttribute('stroke-width', '8');
-    
-    const innerShape = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    innerShape.setAttribute('points', '200,100 250,150 250,200 200,250 150,200 150,150');
-    innerShape.setAttribute('fill', '#262626');
-    
-    svg.appendChild(polygon);
-    svg.appendChild(innerShape);
-    
-    return svg;
-}
 });
