@@ -1372,7 +1372,7 @@ class HorrorTerminal {
         this.startSequenceTimer();
     }
 
-typeFinalMessage(element, text, callback) {
+typeFinalMessage(element, text, callback, speed = 150) {
     let index = 0;
     element.textContent = ''; // Очищаем элемент
     
@@ -1380,7 +1380,6 @@ typeFinalMessage(element, text, callback) {
         if (index < text.length) {
             element.textContent += text[index];
             
-            // ИСПРАВЛЕНО: определяем currentChar правильно
             const currentChar = text[index];
             
             // Добавляем звук для не-пробельных символов
@@ -1393,7 +1392,7 @@ typeFinalMessage(element, text, callback) {
             clearInterval(interval);
             if (callback) callback();
         }
-    }, 350); // Скорость печати для финальных сообщений
+    }, speed); // Используем переданную скорость
 }
 
 // Инициализация обработчика прокрутки
@@ -1515,14 +1514,11 @@ showFinalMessages() {
     ];
     
     let currentMessageIndex = 0;
-    const displayedMessages = []; // Массив для сохранения показанных сообщений
+    const displayedMessages = [];
     
     const showNextMessage = () => {
         if (currentMessageIndex >= finalTexts.length) {
-            // Все сообщения показаны - сохраняем состояние и запускаем финальную музыку
             console.log("Все финальные сообщения показаны. Сохраняем состояние...");
-            
-            // ДОБАВЛЕНО: Сохраняем состояние что пользователь видел финал
             this.StateManager.markEndingSeen(displayedMessages);
             
             setTimeout(() => {
@@ -1531,23 +1527,26 @@ showFinalMessages() {
             return;
         }
         
-        // Создаем новый элемент для сообщения
         const messageElement = document.createElement('div');
         messageElement.className = 'final-message';
         shutdownScreen.appendChild(messageElement);
         
         const currentText = finalTexts[currentMessageIndex];
-        displayedMessages.push(currentText); // Сохраняем в массив
+        displayedMessages.push(currentText);
         
-        // Печатаем текст по символам
+        // Определяем скорость: для последнего сообщения - очень медленно
+        const isLastMessage = currentMessageIndex === finalTexts.length - 1;
+        const typingSpeed = isLastMessage ? 650 : 150; // 800ms для последнего, 350ms для остальных
+        
+        // Печатаем текст с выбранной скоростью
         this.typeFinalMessage(messageElement, currentText, () => {
             currentMessageIndex++;
-            // Пауза между сообщениями, затем следующее
-            setTimeout(showNextMessage, 1500);
-        });
+            // Пауза между сообщениями (больше перед последним)
+            const pauseTime = isLastMessage ? 3000 : 1500;
+            setTimeout(showNextMessage, pauseTime);
+        }, typingSpeed);
     };
     
-    // Начинаем показ сообщений
     showNextMessage();
 }
 
@@ -1619,7 +1618,7 @@ startShutdownEffect() {
                 // Запускаем печать финальных сообщений
                 setTimeout(() => {
                     this.showFinalMessages();
-                }, 600); // Небольшая задержка перед началом печати
+                }, 1000); // Небольшая задержка перед началом печати
             }
         }
     }, 6000);
